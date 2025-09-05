@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "InvisiLaunch": {
+      "commandName": "Project",
+      "commandLineArgs": "\"C:\\Users\\jkesslfe\\OneDrive - WBA\\Documents\\.Walgreens\\package\\DocJoiner\\DocJoiner_All_PSWrapper.ps1\""
+    }
+  }
+}
