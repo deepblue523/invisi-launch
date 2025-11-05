@@ -46,22 +46,22 @@ namespace InvisiLaunch
                 startInfo.Arguments = arguments;
             }
 
-            startInfo.UseShellExecute = false;
+            /*startInfo.UseShellExecute = false;
             startInfo.RedirectStandardOutput = true;
-            startInfo.RedirectStandardError = true;
+            startInfo.RedirectStandardError = true;*/
             //WindowStyle = ProcessWindowStyle.Hidden,
             startInfo.CreateNoWindow = true;
 
             var process = Process.Start(startInfo);
             
             // Redirect output streams to null (bit bucket)
-            if (process != null)
+            /*if (process != null)
             {
-                process.OutputDataReceived += (sender, e) => { /* Discard output */ };
-                process.ErrorDataReceived += (sender, e) => { /* Discard errors */ };
+                process.OutputDataReceived += (sender, e) => { };
+                process.ErrorDataReceived += (sender, e) => { };
                 process.BeginOutputReadLine();
                 process.BeginErrorReadLine();
-            }
+            }*/
         }
     }
 }
