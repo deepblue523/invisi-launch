@@ -85,48 +85,76 @@ namespace InvisiLaunch
             try
             {
                 ProcessPriorityClass priority = ProcessPriorityClass.Normal;
-                int programStartIndex = 0;
+                string workingDirectory = null;
+                int programStartIndex = -1;
 
                 // Parse command-line parameters
                 for (int i = 0; i < args.Length; i++)
                 {
-                    if (args[i].StartsWith("/priority:", StringComparison.OrdinalIgnoreCase))
+                    string argument = args[i];
+
+                    if (argument.StartsWith("/priority:", StringComparison.OrdinalIgnoreCase))
                     {
-                        string priorityValue = args[i].Substring("/priority:".Length).ToUpper();
+                        string priorityValue = argument.Substring("/priority:".Length).ToUpper();
                         if (!IsValidPriorityValue(priorityValue))
                         {
                             HandleError($"Invalid priority value: {priorityValue}\nValid values: ABOVE_NORMAL, NORMAL, BELOW_NORMAL, LOW", onErrorAction);
                             return 8;
                         }
                         priority = MapPriorityValue(priorityValue);
-                        programStartIndex = i + 1;
-                        break;
+                        continue;
                     }
-                    else if (args[i].StartsWith("/", StringComparison.OrdinalIgnoreCase))
+
+                    if (argument.StartsWith("/workingDir:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string rawWorkingDir = argument.Substring("/workingDir:".Length);
+                        if (string.IsNullOrWhiteSpace(rawWorkingDir))
+                        {
+                            HandleError("Invalid /workingDir value: path is empty.", onErrorAction);
+                            return 8;
+                        }
+
+                        workingDirectory = ParseWorkingDirectory(rawWorkingDir);
+                        if (string.IsNullOrWhiteSpace(workingDirectory))
+                        {
+                            HandleError("Invalid /workingDir value: path is empty.", onErrorAction);
+                            return 8;
+                        }
+                        continue;
+                    }
+
+                    if (argument.StartsWith("/", StringComparison.OrdinalIgnoreCase))
                     {
                         // Unknown parameter
-                        HandleError($"Unknown parameter: {args[i]}\nUse /help for usage information.", onErrorAction);
+                        HandleError($"Unknown parameter: {argument}\nUse /help for usage information.", onErrorAction);
                         return 8;
                     }
-                    else
-                    {
-                        // Found the program name
-                        programStartIndex = i;
-                        break;
-                    }
+
+                    // Found the program name
+                    programStartIndex = i;
+                    break;
                 }
 
-                if (programStartIndex >= args.Length)
+                if (programStartIndex >= args.Length || programStartIndex < 0)
                 {
                     HandleError("No program specified.\nUse /help for usage information.", onErrorAction);
                     return 8;
+                }
+
+                if (!string.IsNullOrEmpty(workingDirectory))
+                {
+                    if (!Directory.Exists(workingDirectory))
+                    {
+                        HandleError($"Working directory does not exist: {workingDirectory}", onErrorAction);
+                        return 8;
+                    }
                 }
 
                 // Extract program and its arguments
                 string[] programArgs = new string[args.Length - programStartIndex];
                 Array.Copy(args, programStartIndex, programArgs, 0, args.Length - programStartIndex);
 
-                LaunchApplication(programArgs, priority);
+                LaunchApplication(programArgs, priority, workingDirectory);
                 return 0;
             }
             catch (Exception ex)
@@ -175,12 +203,25 @@ namespace InvisiLaunch
             }
         }
 
+        private static string ParseWorkingDirectory(string argumentValue)
+        {
+            string trimmedValue = argumentValue.Trim();
+
+            if (trimmedValue.Length >= 2 && trimmedValue.StartsWith("\"") && trimmedValue.EndsWith("\""))
+            {
+                trimmedValue = trimmedValue.Substring(1, trimmedValue.Length - 2);
+            }
+
+            // Expand environment variables to allow %TEMP% style inputs
+            return Environment.ExpandEnvironmentVariables(trimmedValue);
+        }
+
         private static void ShowHelp()
         {
             string helpText = @"InvisiLaunch - Launch applications invisibly in the background
 
 USAGE:
-    InvisiLaunch.exe [/onError:<action>] [/priority:<value>] <program> [arguments...]
+    InvisiLaunch.exe [/onError:<action>] [/priority:<value>] [/workingDir:<path>] <program> [arguments...]
     InvisiLaunch.exe [/onError:<action>] /bypass <command>
 
 PARAMETERS:
@@ -191,6 +232,10 @@ PARAMETERS:
     /priority:<value>    Set process priority for the launched program
                          Values: ABOVE_NORMAL, NORMAL, BELOW_NORMAL, LOW
                          Default: NORMAL
+
+    /workingDir:<path>   Set the working directory before launching the program
+                         Surround the path with quotes if it contains spaces
+                         Environment variables (e.g. %TEMP%) are supported
 
     /bypass              Bypass all logic and launch the specified app with a shell command
                          Executes the command as-is without any processing
@@ -205,6 +250,8 @@ EXAMPLES:
     InvisiLaunch.exe /onError:ignore notepad.exe C:\temp\file.txt
     
     InvisiLaunch.exe C:\scripts\myscript.ps1 -param1 value1
+
+    InvisiLaunch.exe /workingDir:""C:\scripts"" C:\scripts\backup.ps1 -source C:\data
     
     InvisiLaunch.exe /priority:BELOW_NORMAL C:\scripts\backup.ps1 -source C:\data
     
@@ -363,7 +410,7 @@ NOTES:
             }
         }
 
-        private static void LaunchApplication(string[] args, ProcessPriorityClass priority)
+        private static void LaunchApplication(string[] args, ProcessPriorityClass priority, string workingDirectory)
         {
             string programPath = args[0];
             string arguments = args.Length > 1 ? string.Join(" ", args, 1, args.Length - 1) : "";
@@ -380,6 +427,11 @@ NOTES:
             {
                 startInfo.FileName = programPath;
                 startInfo.Arguments = arguments;
+            }
+
+            if (!string.IsNullOrEmpty(workingDirectory))
+            {
+                startInfo.WorkingDirectory = workingDirectory;
             }
 
             /*startInfo.UseShellExecute = false;
