@@ -2,7 +2,7 @@
   "profiles": {
     "InvisiLaunch": {
       "commandName": "Project",
-      "commandLineArgs": "\"C:\\Users\\jkesslfe\\OneDrive - WBA\\Documents\\.Walgreens\\package\\Document_Extract.bat\""
+      "commandLineArgs": "/tray \"C:\\Users\\jkesslfe\\OneDrive - WBA\\Documents\\.Walgreens\\Context\\Document_Extract.bat\""
     }
   }
 }

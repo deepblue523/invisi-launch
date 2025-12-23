@@ -58,8 +58,24 @@ namespace InvisiLaunch
                 return 0;
             }
 
+            // Check for /tray - creates tray console window
+            bool useTray = false;
+            List<string> trayFilteredArgs = new List<string>();
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (args[i].Equals("/tray", StringComparison.OrdinalIgnoreCase))
+                {
+                    useTray = true;
+                }
+                else
+                {
+                    trayFilteredArgs.Add(args[i]);
+                }
+            }
+            args = trayFilteredArgs.ToArray();
+
             // Check for /bypass - bypasses all logic and launches with shell command
-            if (args[0].Equals("/bypass", StringComparison.OrdinalIgnoreCase))
+            if (args.Length > 0 && args[0].Equals("/bypass", StringComparison.OrdinalIgnoreCase))
             {
                 if (args.Length < 2)
                 {
@@ -72,7 +88,14 @@ namespace InvisiLaunch
                     // Extract program and all its arguments
                     string[] programArgs = new string[args.Length - 1];
                     Array.Copy(args, 1, programArgs, 0, args.Length - 1);
-                    LaunchWithBypass(programArgs);
+                    if (useTray)
+                    {
+                        LaunchWithBypassInTray(programArgs, onErrorAction);
+                    }
+                    else
+                    {
+                        LaunchWithBypass(programArgs);
+                    }
                     return 0;
                 }
                 catch (Exception ex)
@@ -154,7 +177,14 @@ namespace InvisiLaunch
                 string[] programArgs = new string[args.Length - programStartIndex];
                 Array.Copy(args, programStartIndex, programArgs, 0, args.Length - programStartIndex);
 
-                LaunchApplication(programArgs, priority, workingDirectory);
+                if (useTray)
+                {
+                    LaunchApplicationInTray(programArgs, priority, workingDirectory, onErrorAction);
+                }
+                else
+                {
+                    LaunchApplication(programArgs, priority, workingDirectory);
+                }
                 return 0;
             }
             catch (Exception ex)
@@ -221,8 +251,8 @@ namespace InvisiLaunch
             string helpText = @"InvisiLaunch - Launch applications invisibly in the background
 
 USAGE:
-    InvisiLaunch.exe [/onError:<action>] [/priority:<value>] [/workingDir:<path>] <program> [arguments...]
-    InvisiLaunch.exe [/onError:<action>] /bypass <command>
+    InvisiLaunch.exe [/onError:<action>] [/priority:<value>] [/workingDir:<path>] [/tray] <program> [arguments...]
+    InvisiLaunch.exe [/onError:<action>] [/tray] /bypass <command>
 
 PARAMETERS:
     /onError:<action>    Control error handling behavior
@@ -236,6 +266,10 @@ PARAMETERS:
     /workingDir:<path>   Set the working directory before launching the program
                          Surround the path with quotes if it contains spaces
                          Environment variables (e.g. %TEMP%) are supported
+
+    /tray                Create a system tray console window to display output
+                         Window can be opened from tray, minimized to tray, and closed
+                         Window size and position are remembered
 
     /bypass              Bypass all logic and launch the specified app with a shell command
                          Executes the command as-is without any processing
@@ -255,6 +289,8 @@ EXAMPLES:
     
     InvisiLaunch.exe /priority:BELOW_NORMAL C:\scripts\backup.ps1 -source C:\data
     
+    InvisiLaunch.exe /tray C:\scripts\myscript.ps1 -param1 value1
+    
     InvisiLaunch.exe /bypass notepad.exe C:\temp\file.txt
     
     InvisiLaunch.exe /onError:ignore /bypass dir C:\temp
@@ -266,7 +302,8 @@ EXIT CODES:
 NOTES:
     - Parameters must come before the program name
     - PowerShell scripts (.ps1) are automatically detected and executed
-    - All output is redirected and no console window is shown
+    - All output is redirected and no console window is shown (unless /tray is used)
+    - /tray creates a system tray console window that displays output from the launched program
     - /bypass mode executes the command as a shell command without any processing
     - /onError:message displays an error message box (default behavior)
     - /onError:ignore silently ignores errors and returns exit code 8";
@@ -464,6 +501,192 @@ NOTES:
                 process.BeginOutputReadLine();
                 process.BeginErrorReadLine();
             }*/
+        }
+
+        private static void LaunchApplicationInTray(string[] args, ProcessPriorityClass priority, string workingDirectory, string onErrorAction)
+        {
+            // Create tray console form (starts hidden in tray)
+            TrayConsoleForm trayForm = new TrayConsoleForm();
+
+            try
+            {
+                string programPath = args[0];
+                string arguments = args.Length > 1 ? string.Join(" ", args, 1, args.Length - 1) : "";
+
+                var startInfo = new ProcessStartInfo();
+
+                // Check if it's a PowerShell script
+                if (programPath.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase))
+                {
+                    startInfo.FileName = "powershell.exe";
+                    startInfo.Arguments = $"-ExecutionPolicy Bypass -NoProfile -OutputEncoding UTF8 -File \"{programPath}\" {arguments}";
+                }
+                else
+                {
+                    startInfo.FileName = programPath;
+                    startInfo.Arguments = arguments;
+                }
+
+                if (!string.IsNullOrEmpty(workingDirectory))
+                {
+                    startInfo.WorkingDirectory = workingDirectory;
+                }
+
+                startInfo.UseShellExecute = false;
+                startInfo.RedirectStandardOutput = true;
+                startInfo.RedirectStandardError = true;
+                startInfo.CreateNoWindow = true;
+                // Note: Unicode is handled by ConsoleWriter which uses UTF-8 encoding
+
+                Process process = null;
+                try
+                {
+                    process = Process.Start(startInfo);
+                }
+                catch (Exception ex)
+                {
+                    HandleError($"Failed to start the application: {ex.Message}", onErrorAction);
+                    trayForm.Close();
+                    return;
+                }
+                
+                // Check if process failed to start
+                if (process == null)
+                {
+                    HandleError("Failed to start the application.", onErrorAction);
+                    trayForm.Close();
+                    return;
+                }
+
+                // Set process priority
+                try
+                {
+                    process.PriorityClass = priority;
+                }
+                catch (Exception)
+                {
+                    // If setting priority fails, continue with default priority
+                }
+
+                // Redirect output to console (which goes to tray form)
+                // Only set up handlers if the process is still running
+                try
+                {
+                    if (!process.HasExited)
+                    {
+                        process.OutputDataReceived += (sender, e) =>
+                        {
+                            if (!string.IsNullOrEmpty(e.Data))
+                            {
+                                Console.WriteLine(e.Data);
+                            }
+                        };
+                        process.ErrorDataReceived += (sender, e) =>
+                        {
+                            if (!string.IsNullOrEmpty(e.Data))
+                            {
+                                Console.Error.WriteLine(e.Data);
+                            }
+                        };
+                        process.BeginOutputReadLine();
+                        process.BeginErrorReadLine();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // If output redirection fails, continue anyway (some apps don't support it)
+                    Console.WriteLine($"[Note: Output redirection not available for this application: {ex.Message}]");
+                }
+
+                // Run the message loop to keep the form alive
+                Application.Run(trayForm);
+            }
+            catch (Exception ex)
+            {
+                HandleError(ex, onErrorAction);
+                trayForm.Close();
+            }
+        }
+
+        private static void LaunchWithBypassInTray(string[] args, string onErrorAction)
+        {
+            // Create tray console form (starts hidden in tray)
+            TrayConsoleForm trayForm = new TrayConsoleForm();
+
+            try
+            {
+                // Bypass all logic - just launch with shell command
+                string command = string.Join(" ", args);
+                
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = "cmd.exe",
+                    Arguments = $"/c chcp 65001 >nul && {command}",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                };
+                // Note: Unicode is handled by ConsoleWriter which uses UTF-8 encoding
+
+                Process process = null;
+                try
+                {
+                    process = Process.Start(startInfo);
+                }
+                catch (Exception ex)
+                {
+                    HandleError($"Failed to start the application: {ex.Message}", onErrorAction);
+                    trayForm.Close();
+                    return;
+                }
+                
+                // Check if process failed to start
+                if (process == null)
+                {
+                    HandleError("Failed to start the application.", onErrorAction);
+                    trayForm.Close();
+                    return;
+                }
+
+                // Redirect output to console (which goes to tray form)
+                // Only set up handlers if the process is still running
+                try
+                {
+                    if (!process.HasExited)
+                    {
+                        process.OutputDataReceived += (sender, e) =>
+                        {
+                            if (!string.IsNullOrEmpty(e.Data))
+                            {
+                                Console.WriteLine(e.Data);
+                            }
+                        };
+                        process.ErrorDataReceived += (sender, e) =>
+                        {
+                            if (!string.IsNullOrEmpty(e.Data))
+                            {
+                                Console.Error.WriteLine(e.Data);
+                            }
+                        };
+                        process.BeginOutputReadLine();
+                        process.BeginErrorReadLine();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // If output redirection fails, continue anyway (some apps don't support it)
+                    Console.WriteLine($"[Note: Output redirection not available for this application: {ex.Message}]");
+                }
+
+                // Run the message loop to keep the form alive
+                Application.Run(trayForm);
+            }
+            catch (Exception ex)
+            {
+                HandleError(ex, onErrorAction);
+                trayForm.Close();
+            }
         }
     }
 }
