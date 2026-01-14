@@ -6,7 +6,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>InvisiLaunch</AssemblyName>
     <RootNamespace>InvisiLaunch</RootNamespace>
-    <ApplicationIcon />
+    <ApplicationIcon>images\Invisible x32.ico</ApplicationIcon>
     <StartupObject />
   </PropertyGroup>
 
